@@ -35,4 +35,3 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // Initialize when the extension loads
 initializeStorage();
-p
