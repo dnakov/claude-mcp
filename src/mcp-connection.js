@@ -47,27 +47,29 @@ export class MCPConnection {
       // Parse and validate URL
       const sseUrl = new URL(this.config.url);
       
-      // Add transportType parameter (required for SSE)
-      if (!sseUrl.searchParams.has('transportType')) {
-        sseUrl.searchParams.set('transportType', this.config.transportType || 'stdio');
-      }
-      
-      // Add command parameter if specified and not empty
-      if (this.config.command && this.config.command.trim()) {
-        sseUrl.searchParams.set('command', this.config.command);
-      }
-      
-      // Add args parameter if specified and not empty
-      if (this.config.args) {
-        let argsValue = '';
-        if (Array.isArray(this.config.args)) {
-          argsValue = this.config.args.filter(arg => arg).join(' ');
-        } else if (typeof this.config.args === 'string') {
-          argsValue = this.config.args.trim();
+      if(this.config.command?.trim()?.length > 0) {
+        // Add transportType parameter (required for SSE)
+        if (!sseUrl.searchParams.has('transportType')) {
+          sseUrl.searchParams.set('transportType', this.config.transportType || 'stdio');
         }
         
-        if (argsValue) {
-          sseUrl.searchParams.set('args', argsValue);
+        // Add command parameter if specified and not empty
+        if (this.config.command && this.config.command.trim()) {
+          sseUrl.searchParams.set('command', this.config.command);
+        }
+        
+        // Add args parameter if specified and not empty
+        if (this.config.args) {
+          let argsValue = '';
+          if (Array.isArray(this.config.args)) {
+            argsValue = this.config.args.filter(arg => arg).join(' ');
+          } else if (typeof this.config.args === 'string') {
+            argsValue = this.config.args.trim();
+          }
+          
+          if (argsValue) {
+            sseUrl.searchParams.set('args', argsValue);
+          }
         }
       }
       
