@@ -198,17 +198,7 @@
   async function saveToStorage(key, value) {
     try {
       await browser.storage.local.set({ [key]: value });
-      
-      if (key === 'mcpServers') {
-        // Notify content script that servers have been updated
-        const tabs = await browser.tabs.query({ active: true, currentWindow: true });
-        if (tabs[0]?.id) {
-          browser.tabs.sendMessage(tabs[0].id, { 
-            type: 'servers-updated',
-            debugLog
-          });
-        }
-      }
+      // The storage listener in isolated-content.js will handle notifying content scripts
     } catch (e) {
       status = `Error saving: ${e.message}`;
       console.error(`Error saving ${key}:`, e);

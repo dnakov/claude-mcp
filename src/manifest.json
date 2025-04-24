@@ -2,7 +2,7 @@
   "{{chrome}}.manifest_version": 3,
   "{{firefox}}.manifest_version": 2,
   "name": "MCP for claude.ai",
-  "description": "Enable MCP in claude.ai",
+  "description": "Enable MCP on claude.ai",
   "version": "1.0.0",
   "icons": {
     "16": "icon/16.png",
@@ -39,9 +39,7 @@
   ],
   "{{firefox}}.web_accessible_resources": ["src/content.js", "src/isolated-content.js"],
   "permissions": [
-    "scripting",
-    "storage",
-    "tabs"
+    "storage"
   ],
   "host_permissions": [
     "*://claude.ai/*"
