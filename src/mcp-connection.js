@@ -16,6 +16,11 @@ export class MCPConnection {
     this.resources = new Map();
     this.tools = new Map();
     this.subscriptions = new Map();
+    this.messageHandler = null;
+    this.reconnectAttempts = 0;
+    this.maxReconnectAttempts = 5;
+    this.reconnectDelay = 1000; // Start with 1 second delay
+    this.sessionId = null;
     
     // Log configuration
     log(`[MCP ${this.name}] Initialized with config:`, {
@@ -30,6 +35,7 @@ export class MCPConnection {
 
   // Initialize connection and handle lifecycle
   async connect(handler) {
+    this.messageHandler = handler; // Store handler for reconnection
     log(`[MCP ${this.name}] Connecting with config:`, this.config);
     log(`[MCP ${this.name}] Connection type:`, this.config.connectionType || 'default (ws)');
     
@@ -93,16 +99,24 @@ export class MCPConnection {
         }
       }
       
+      // If we have a session ID from previous connection, reuse it
+      if (this.sessionId) {
+        sseUrl.searchParams.set('session_id', this.sessionId);
+      }
+      
       log(`[MCP ${this.name}] Connecting to SSE URL:`, sseUrl.toString());
       log(`[MCP ${this.name}] Query parameters:`, Object.fromEntries(sseUrl.searchParams));
 
       return new Promise((resolve, reject) => {
         // Create EventSource - don't try to add auth headers here
         this.eventSource = new EventSource(sseUrl.toString());
+        let reconnectAttempt = this.reconnectAttempts > 0;
         
         this.eventSource.onopen = () => {
           log(`[MCP ${this.name}] SSE connection opened`);
-          this.initialized = true;
+          // Reset reconnect attempts on successful connection
+          this.reconnectAttempts = 0;
+          this.reconnectDelay = 1000;
         };
 
         // Handle endpoint event
@@ -110,6 +124,40 @@ export class MCPConnection {
           try {
             this.messageEndpoint = new URL(event.data, sseUrl.origin);
             log(`[MCP ${this.name}] Got message endpoint:`, this.messageEndpoint);
+            
+            // Extract session_id from the URL if present
+            const urlParams = new URLSearchParams(this.messageEndpoint.search);
+            if (urlParams.has('session_id')) {
+              this.sessionId = urlParams.get('session_id');
+              log(`[MCP ${this.name}] Got session ID:`, this.sessionId);
+            }
+            
+            // If this is a reconnect, we need to reinitialize
+            if (reconnectAttempt) {
+              this._sendInitializeRequest()
+                .then(() => {
+                  log(`[MCP ${this.name}] Successfully reinitialized after reconnect`);
+                  this.initialized = true;
+                  resolve(this);
+                })
+                .catch(err => {
+                  console.error(`[MCP ${this.name}] Failed to reinitialize after reconnect:`, err);
+                  this.disconnect();
+                  reject(err);
+                });
+            } else {
+              // For initial connection, just send initialize request
+              this._sendInitializeRequest()
+                .then(() => {
+                  this.initialized = true;
+                  resolve(this);
+                })
+                .catch(err => {
+                  console.error(`[MCP ${this.name}] Failed to initialize:`, err);
+                  this.disconnect();
+                  reject(err);
+                });
+            }
           } catch (e) {
             console.error(`[MCP ${this.name}] Failed to parse endpoint:`, e);
             this.disconnect();
@@ -125,15 +173,50 @@ export class MCPConnection {
             handler(message);
           } catch (e) {
             console.error(`[MCP ${this.name}] Failed to parse message:`, e);
-            this.disconnect();
-            reject(e);
           }
         });
 
         this.eventSource.onerror = (error) => {
           console.error(`[MCP ${this.name}] SSE error:`, error);
-          this.disconnect();
-          reject(new Error('SSE connection failed'));
+          
+          // If we're already initialized, try to reconnect
+          if (this.initialized) {
+            this.initialized = false; // Mark as not initialized during reconnection
+            
+            // Close the current connection
+            if (this.eventSource) {
+              this.eventSource.close();
+              this.eventSource = null;
+            }
+            
+            // If we haven't exceeded max reconnect attempts, try to reconnect
+            if (this.reconnectAttempts < this.maxReconnectAttempts) {
+              this.reconnectAttempts++;
+              log(`[MCP ${this.name}] Attempting SSE reconnection (Attempt ${this.reconnectAttempts})`);
+              
+              // Use exponential backoff for reconnect delay
+              setTimeout(() => {
+                this.connectSSE(handler)
+                  .then(conn => {
+                    log(`[MCP ${this.name}] Successfully reconnected`);
+                  })
+                  .catch(err => {
+                    console.error(`[MCP ${this.name}] Failed to reconnect:`, err);
+                  });
+              }, this.reconnectDelay);
+              
+              // Increase delay for next attempt (exponential backoff with max of 30 seconds)
+              this.reconnectDelay = Math.min(this.reconnectDelay * 2, 30000);
+            } else {
+              console.error(`[MCP ${this.name}] Max reconnect attempts reached`);
+              this.disconnect();
+            }
+          } else {
+            // Initial connection failed
+            console.error(`[MCP ${this.name}] Initial SSE connection failed`);
+            this.disconnect();
+            reject(new Error('SSE connection failed'));
+          }
         };
 
         // Set connection timeout
@@ -150,6 +233,92 @@ export class MCPConnection {
       throw error;
     }
   }
+  
+  // Send MCP initialize request according to the protocol
+  async _sendInitializeRequest() {
+    log(`[MCP ${this.name}] Entering _sendInitializeRequest.`);
+    
+    // Create initialize request according to MCP protocol
+    const initializeRequest = {
+      jsonrpc: "2.0",
+      id: this.getNextId(),
+      method: "initialize",
+      params: {
+        protocolVersion: "2024-11-05",
+        capabilities: {
+          roots: {
+            listChanged: true
+          },
+          sampling: {}
+        },
+        clientInfo: {
+          name: "MCPClient",
+          version: "1.0.0"
+        }
+      }
+    };
+    
+    // Send the initialize request
+    log(`[MCP ${this.name}] Sending initialize POST to ${this.messageEndpoint} with payload:`, initializeRequest);
+    
+    try {
+      const response = await fetch(this.messageEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(this.config.authHeader ? { 'Authorization': this.config.authHeader } : {})
+        },
+        body: JSON.stringify(initializeRequest)
+      });
+      
+      if (response.ok) {
+        log(`[MCP ${this.name}] Initialize request sent successfully (Status: ${response.status}). Waiting for initialize event via SSE.`);
+        
+        // After successful initialize request, send initialized notification
+        await this._sendInitializedNotification();
+        return true;
+      } else {
+        const errorText = await response.text();
+        throw new Error(`Initialize request failed: ${response.status} ${errorText}`);
+      }
+    } catch (error) {
+      console.error(`[MCP ${this.name}] Initialize request failed:`, error);
+      throw error;
+    }
+  }
+  
+  // Send MCP initialized notification according to the protocol
+  async _sendInitializedNotification() {
+    // Create initialized notification according to MCP protocol
+    const initializedNotification = {
+      jsonrpc: "2.0",
+      method: "notifications/initialized"
+    };
+    
+    // Send the initialized notification
+    try {
+      const response = await fetch(this.messageEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(this.config.authHeader ? { 'Authorization': this.config.authHeader } : {})
+        },
+        body: JSON.stringify(initializedNotification)
+      });
+      
+      if (response.ok) {
+        log(`[MCP ${this.name}] Initialized notification sent successfully (Status: ${response.status}).`);
+        return true;
+      } else {
+        const errorText = await response.text();
+        throw new Error(`Initialized notification failed: ${response.status} ${errorText}`);
+      }
+    } catch (error) {
+      console.error(`[MCP ${this.name}] Initialized notification failed:`, error);
+      throw error;
+    }
+  }
+  
   // Handle incoming messages
   async handleMessage(message, resolve, reject) {
     log('Received message:', message);
@@ -160,6 +329,22 @@ export class MCPConnection {
   }
 
   async sendRequest(request) {
+    // If we're not initialized, try to reconnect first
+    if (!this.initialized && this.messageHandler) {
+      try {
+        log(`[MCP ${this.name}] Connection not initialized, attempting to reconnect before sending request`);
+        await this.connectSSE(this.messageHandler);
+      } catch (error) {
+        console.error(`[MCP ${this.name}] Failed to reconnect:`, error);
+        return {
+          error: {
+            code: -1,
+            message: "Connection not initialized and reconnect failed"
+          }
+        };
+      }
+    }
+    
     if (this.config.connectionType === 'sse') {
       log(`[MCP ${this.name}] Sending SSE request to ${this.messageEndpoint}:`, request);
       try {
@@ -262,4 +447,4 @@ export class MCPConnection {
     
     log(`[MCP ${this.name}] Disconnected`);
   }
-} 
+}
