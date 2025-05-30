@@ -204,6 +204,113 @@
       console.error(`Error saving ${key}:`, e);
     }
   }
+
+  // Export server configurations
+  function exportSettings() {
+    try {
+      const exportData = {
+        version: "1.0.0",
+        exportDate: new Date().toISOString(),
+        servers: servers,
+        settings: {
+          debugLog,
+          darkMode
+        }
+      };
+      
+      const dataStr = JSON.stringify(exportData, null, 2);
+      const dataBlob = new Blob([dataStr], { type: 'application/json' });
+      
+      const url = URL.createObjectURL(dataBlob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `claude-mcp-settings-${new Date().toISOString().split('T')[0]}.json`;
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      URL.revokeObjectURL(url);
+      status = `Exported ${servers.length} servers`;
+    } catch (e) {
+      status = `Export failed: ${e.message}`;
+      console.error('Export error:', e);
+    }
+  }
+
+  // Import server configurations
+  function importSettings(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const importData = JSON.parse(e.target.result);
+        
+        // Basic validation
+        if (!importData.servers || !Array.isArray(importData.servers)) {
+          throw new Error('Invalid format: servers array not found');
+        }
+        
+        // Validate each server has required fields
+        for (const server of importData.servers) {
+          if (!server.name || !server.url) {
+            throw new Error(`Invalid server: missing name or url`);
+          }
+        }
+        
+        // Ask user about merge strategy
+        const shouldReplace = confirm(
+          `Import ${importData.servers.length} servers?\n\n` +
+          `Current servers: ${servers.length}\n` +
+          `Click OK to REPLACE all current servers\n` +
+          `Click Cancel to ADD to existing servers`
+        );
+        
+        let newServers;
+        if (shouldReplace) {
+          newServers = importData.servers;
+        } else {
+          // Merge: add new servers, skip duplicates by name
+          const existingNames = new Set(servers.map(s => s.name));
+          const newOnes = importData.servers.filter(s => !existingNames.has(s.name));
+          newServers = [...servers, ...newOnes];
+        }
+        
+        // Save servers
+        servers = newServers;
+        await saveToStorage('mcpServers', servers);
+        
+        // Import settings if available
+        if (importData.settings) {
+          if (importData.settings.debugLog !== undefined) {
+            debugLog = importData.settings.debugLog;
+            await saveToStorage('mcpDebugLog', debugLog);
+          }
+          if (importData.settings.darkMode !== undefined) {
+            darkMode = importData.settings.darkMode;
+            await saveToStorage('mcpDarkMode', darkMode);
+            updateTheme();
+          }
+        }
+        
+        status = shouldReplace ? 
+          `Replaced with ${newServers.length} servers` : 
+          `Added ${newServers.length - servers.length + importData.servers.length} new servers (${newServers.length} total)`;
+        
+        // Clear file input
+        event.target.value = '';
+        
+      } catch (e) {
+        status = `Import failed: ${e.message}`;
+        console.error('Import error:', e);
+        event.target.value = '';
+      }
+    };
+    
+    reader.readAsText(file);
+  }
 </script>
 
 <div class="w-full max-w-2xl p-3 bg-[hsl(var(--bg-100))] text-[hsl(var(--text-100))] rounded-lg">
@@ -372,22 +479,53 @@
   </div>
   
   <!-- Footer Controls -->
-  <div class="mt-4 pt-3 border-t border-[hsl(var(--border-100))] flex items-center justify-between">
-    <label class="flex items-center cursor-pointer">
-      <input 
-        type="checkbox" 
-        bind:checked={debugLog} 
-        onchange={() => saveToStorage('mcpDebugLog', debugLog)}
-        class="form-checkbox h-5 w-5 bg-[hsl(var(--bg-100))] border-[hsl(var(--border-100))] rounded text-[hsl(var(--accent-main-100))] focus:ring-[hsl(var(--accent-main-100))] focus:ring-opacity-25 focus:ring-offset-0"
-      />
-      <span class="ml-2 text-sm text-[hsl(var(--text-200))]">Enable Debug Logging</span>
-    </label>
+  <div class="mt-4 pt-3 border-t border-[hsl(var(--border-100))] space-y-3">
+    <!-- Import/Export Section -->
+    <div class="flex items-center justify-between">
+      <div class="flex gap-2">
+        <button 
+          onclick={exportSettings}
+          class="px-3 py-1 text-xs bg-[hsl(var(--accent-main-100))] hover:bg-[hsl(var(--accent-main-000))] text-white rounded-md font-medium"
+        >
+          Export Settings
+        </button>
+        
+        <label class="relative cursor-pointer">
+          <input 
+            type="file" 
+            accept=".json"
+            onchange={importSettings}
+            class="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+          />
+          <span class="block px-3 py-1 text-xs bg-[hsl(var(--bg-300))] hover:bg-[hsl(var(--bg-400))] text-[hsl(var(--text-200))] rounded-md font-medium">
+            Import Settings
+          </span>
+        </label>
+      </div>
+      
+      <button 
+        onclick={toggleDarkMode}
+        class="px-2 py-1 text-xs bg-[hsl(var(--bg-300))] hover:bg-[hsl(var(--bg-400))] rounded-md text-[hsl(var(--text-200))]"
+      >
+        {darkMode ? "Light Mode" : "Dark Mode"}
+      </button>
+    </div>
     
-    <button 
-      onclick={toggleDarkMode}
-      class="px-2 py-1 text-xs bg-[hsl(var(--bg-300))] hover:bg-[hsl(var(--bg-400))] rounded-md text-[hsl(var(--text-200))]"
-    >
-      {darkMode ? "Light Mode" : "Dark Mode"}
-    </button>
+    <!-- Debug Settings -->
+    <div class="flex items-center justify-between">
+      <label class="flex items-center cursor-pointer">
+        <input 
+          type="checkbox" 
+          bind:checked={debugLog} 
+          onchange={() => saveToStorage('mcpDebugLog', debugLog)}
+          class="form-checkbox h-4 w-4 bg-[hsl(var(--bg-100))] border-[hsl(var(--border-100))] rounded text-[hsl(var(--accent-main-100))] focus:ring-[hsl(var(--accent-main-100))] focus:ring-opacity-25 focus:ring-offset-0"
+        />
+        <span class="ml-2 text-xs text-[hsl(var(--text-200))]">Enable Debug Logging</span>
+      </label>
+      
+      <div class="text-xs text-[hsl(var(--text-300))]">
+        {servers.length} server{servers.length !== 1 ? 's' : ''} configured
+      </div>
+    </div>
   </div>
 </div>
