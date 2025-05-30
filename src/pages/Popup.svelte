@@ -303,40 +303,67 @@
             }
           }
           
-          // Ask user with very clear messaging
-          const shouldReplace = confirm(
+          // Ask user with very clear messaging - ADD first (less destructive)
+          const shouldAdd = confirm(
             `📥 IMPORT ${importData.servers.length} SERVERS\n\n` +
             `Current servers: ${servers.length}\n` +
             `Import servers: ${importData.servers.length}\n\n` +
-            `❌ CANCEL = Don't import anything\n` +
-            `✅ OK = REPLACE all current servers\n` +
-            `📝 To ADD instead, click Cancel and we'll ask again...`
+            `❌ CANCEL = Ask about replacing instead\n` +
+            `✅ OK = ADD/UPDATE servers (update existing by name)\n`
           );
           
           let newServers;
-          if (shouldReplace) {
-            // User chose OK = Replace
-            newServers = [...importData.servers];
+          if (shouldAdd) {
+            // User chose OK = Add/Update
+            const existingServerMap = new Map(servers.map(s => [s.name, s]));
+            const updatedServers = [...servers];
+            
+            // Add new or update existing servers
+            for (const importServer of importData.servers) {
+              const existingIndex = updatedServers.findIndex(s => s.name === importServer.name);
+              if (existingIndex >= 0) {
+                // Update existing server
+                updatedServers[existingIndex] = { ...importServer };
+              } else {
+                // Add new server
+                updatedServers.push({ ...importServer });
+              }
+            }
+            
+            newServers = updatedServers;
           } else {
-            // User chose Cancel, ask about adding instead
-            const shouldAdd = confirm(
-              `📥 ADD SERVERS INSTEAD?\n\n` +
+            // User chose Cancel, ask about replacing instead
+            const shouldReplace = confirm(
+              `📥 REPLACE ALL SERVERS INSTEAD?\n\n` +
               `Current servers: ${servers.length}\n` +
-              `New servers to add: ${importData.servers.length}\n\n` +
+              `Import servers: ${importData.servers.length}\n\n` +
               `❌ CANCEL = Don't import anything\n` +
-              `✅ OK = ADD new servers (skip duplicates by name)`
+              `✅ OK = REPLACE all current servers`
             );
             
-            if (shouldAdd) {
-              // Merge: add new servers, skip duplicates by name
-              const existingNames = new Set(servers.map(s => s.name));
-              const newOnes = importData.servers.filter(s => !existingNames.has(s.name));
-              newServers = [...servers, ...newOnes];
+            if (shouldReplace) {
+              // User chose OK = Replace all
+              newServers = [...importData.servers];
             } else {
               // User really wants to cancel
               status = 'Import cancelled';
               event.target.value = '';
               return;
+            }
+          }
+          
+          // Calculate how many were new vs updated for better status message
+          let addedCount = 0;
+          let updatedCount = 0;
+          
+          if (shouldAdd) {
+            const existingNames = new Set(servers.map(s => s.name));
+            for (const importServer of importData.servers) {
+              if (existingNames.has(importServer.name)) {
+                updatedCount++;
+              } else {
+                addedCount++;
+              }
             }
           }
           
@@ -357,9 +384,9 @@
             }
           }
           
-          status = shouldReplace ? 
-            `✅ Replaced with ${newServers.length} servers` : 
-            `✅ Added ${newServers.length - servers.length} new servers (${newServers.length} total)`;
+          status = shouldAdd ? 
+            `✅ Added ${addedCount} new, updated ${updatedCount} existing (${newServers.length} total)` : 
+            `✅ Replaced with ${newServers.length} servers`;
           
           // Clear file input
           event.target.value = '';
