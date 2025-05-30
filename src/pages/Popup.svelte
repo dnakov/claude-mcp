@@ -19,8 +19,6 @@
   let status = $state('');
   let debugLog = $state(false);
   let darkMode = $state(false);
-  let showImportModal = $state(false);
-  let importData = $state(null);
 
   // Set theme on document body
   function updateTheme() {
@@ -281,19 +279,19 @@
             throw new Error('No file content received');
           }
           
-          const data = JSON.parse(e.target.result);
+          const importData = JSON.parse(e.target.result);
           
           // Basic validation
-          if (!data || typeof data !== 'object') {
+          if (!importData || typeof importData !== 'object') {
             throw new Error('Invalid format: not a valid JSON object');
           }
           
-          if (!data.servers || !Array.isArray(data.servers)) {
+          if (!importData.servers || !Array.isArray(importData.servers)) {
             throw new Error('Invalid format: servers array not found');
           }
           
           // Validate each server has required fields
-          for (const [index, server] of data.servers.entries()) {
+          for (const [index, server] of importData.servers.entries()) {
             if (!server || typeof server !== 'object') {
               throw new Error(`Invalid server at position ${index + 1}: not an object`);
             }
@@ -305,9 +303,63 @@
             }
           }
           
-          // Store import data and show modal
-          importData = data;
-          showImportModal = true;
+          // Ask user with very clear messaging
+          const shouldReplace = confirm(
+            `📥 IMPORT ${importData.servers.length} SERVERS\n\n` +
+            `Current servers: ${servers.length}\n` +
+            `Import servers: ${importData.servers.length}\n\n` +
+            `❌ CANCEL = Don't import anything\n` +
+            `✅ OK = REPLACE all current servers\n` +
+            `📝 To ADD instead, click Cancel and we'll ask again...`
+          );
+          
+          let newServers;
+          if (shouldReplace) {
+            // User chose OK = Replace
+            newServers = [...importData.servers];
+          } else {
+            // User chose Cancel, ask about adding instead
+            const shouldAdd = confirm(
+              `📥 ADD SERVERS INSTEAD?\n\n` +
+              `Current servers: ${servers.length}\n` +
+              `New servers to add: ${importData.servers.length}\n\n` +
+              `❌ CANCEL = Don't import anything\n` +
+              `✅ OK = ADD new servers (skip duplicates by name)`
+            );
+            
+            if (shouldAdd) {
+              // Merge: add new servers, skip duplicates by name
+              const existingNames = new Set(servers.map(s => s.name));
+              const newOnes = importData.servers.filter(s => !existingNames.has(s.name));
+              newServers = [...servers, ...newOnes];
+            } else {
+              // User really wants to cancel
+              status = 'Import cancelled';
+              event.target.value = '';
+              return;
+            }
+          }
+          
+          // Save servers
+          servers = newServers;
+          await saveToStorage('mcpServers', servers);
+          
+          // Import settings if available
+          if (importData.settings && typeof importData.settings === 'object') {
+            if (importData.settings.debugLog !== undefined) {
+              debugLog = Boolean(importData.settings.debugLog);
+              await saveToStorage('mcpDebugLog', debugLog);
+            }
+            if (importData.settings.darkMode !== undefined) {
+              darkMode = Boolean(importData.settings.darkMode);
+              await saveToStorage('mcpDarkMode', darkMode);
+              updateTheme();
+            }
+          }
+          
+          status = shouldReplace ? 
+            `✅ Replaced with ${newServers.length} servers` : 
+            `✅ Added ${newServers.length - servers.length} new servers (${newServers.length} total)`;
           
           // Clear file input
           event.target.value = '';
@@ -325,67 +377,6 @@
       console.error('Import setup error:', e);
       status = `Import failed: ${e.message}`;
       event.target.value = '';
-    }
-  }
-
-  // Handle import actions
-  async function handleImportAction(action) {
-    if (!importData) {
-      console.error('No import data available');
-      status = 'No import data available';
-      return;
-    }
-    
-    try {
-      if (action === 'cancel') {
-        showImportModal = false;
-        importData = null;
-        status = 'Import cancelled';
-        return;
-      }
-      
-      let newServers;
-      if (action === 'replace') {
-        newServers = [...importData.servers]; // Create a copy
-      } else if (action === 'add') {
-        // Merge: add new servers, skip duplicates by name
-        const existingNames = new Set(servers.map(s => s.name));
-        const newOnes = importData.servers.filter(s => !existingNames.has(s.name));
-        newServers = [...servers, ...newOnes];
-      } else {
-        throw new Error(`Unknown action: ${action}`);
-      }
-      
-      // Save servers
-      servers = newServers;
-      await saveToStorage('mcpServers', servers);
-      
-      // Import settings if available
-      if (importData.settings && typeof importData.settings === 'object') {
-        if (importData.settings.debugLog !== undefined) {
-          debugLog = Boolean(importData.settings.debugLog);
-          await saveToStorage('mcpDebugLog', debugLog);
-        }
-        if (importData.settings.darkMode !== undefined) {
-          darkMode = Boolean(importData.settings.darkMode);
-          await saveToStorage('mcpDarkMode', darkMode);
-          updateTheme();
-        }
-      }
-      
-      const totalImported = action === 'replace' ? newServers.length : (newServers.length - servers.length + importData.servers.length);
-      status = action === 'replace' ? 
-        `Replaced with ${newServers.length} servers` : 
-        `Added ${totalImported} new servers (${newServers.length} total)`;
-      
-      showImportModal = false;
-      importData = null;
-      
-    } catch (e) {
-      console.error('Import action error:', e);
-      status = `Import failed: ${e.message}`;
-      showImportModal = false;
-      importData = null;
     }
   }
 </script>
@@ -630,39 +621,3 @@
     </div>
   </div>
 </div>
-
-<!-- Import Modal -->
-{#if showImportModal && importData}
-  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-    <div class="bg-[hsl(var(--bg-100))] border border-[hsl(var(--border-100))] rounded-lg p-4 max-w-md mx-4">
-      <h3 class="text-base font-semibold mb-3 text-[hsl(var(--text-000))]">Import Settings</h3>
-      
-      <div class="mb-4 text-sm text-[hsl(var(--text-200))]">
-        <p class="mb-2">Found <strong>{importData.servers.length}</strong> servers to import.</p>
-        <p class="mb-2">You currently have <strong>{servers.length}</strong> servers.</p>
-        <p class="text-[hsl(var(--text-300))]">What would you like to do?</p>
-      </div>
-      
-      <div class="flex gap-2 justify-end">
-        <button 
-          onclick={() => handleImportAction('cancel')}
-          class="px-3 py-2 text-sm bg-[hsl(var(--bg-300))] hover:bg-[hsl(var(--bg-400))] text-[hsl(var(--text-200))] rounded-md"
-        >
-          Cancel
-        </button>
-        <button 
-          onclick={() => handleImportAction('replace')}
-          class="px-3 py-2 text-sm bg-[hsl(var(--danger-100))] hover:bg-[hsl(var(--danger-200))] text-white rounded-md"
-        >
-          Replace
-        </button>
-        <button 
-          onclick={() => handleImportAction('add')}
-          class="px-3 py-2 text-sm bg-[hsl(var(--accent-main-100))] hover:bg-[hsl(var(--accent-main-000))] text-white rounded-md"
-        >
-          Add
-        </button>
-      </div>
-    </div>
-  </div>
-{/if}
