@@ -29,28 +29,6 @@
   // Load data on startup
   $effect(() => {
     loadData();
-    
-    // Add global error handler to prevent popup from closing on errors
-    const handleError = (event) => {
-      console.error('Global error caught:', event.error);
-      status = `Error: ${event.error?.message || 'Unknown error occurred'}`;
-      event.preventDefault(); // Prevent default browser error handling
-    };
-    
-    const handleUnhandledRejection = (event) => {
-      console.error('Unhandled promise rejection:', event.reason);
-      status = `Promise error: ${event.reason?.message || 'Unknown promise error'}`;
-      event.preventDefault(); // Prevent default browser error handling
-    };
-    
-    window.addEventListener('error', handleError);
-    window.addEventListener('unhandledrejection', handleUnhandledRejection);
-    
-    // Cleanup on destroy
-    return () => {
-      window.removeEventListener('error', handleError);
-      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
-    };
   });
 
   // Load all data from storage
@@ -604,14 +582,7 @@
           <input 
             type="file" 
             accept=".json"
-            onchange={(e) => {
-              try {
-                importSettings(e);
-              } catch (error) {
-                console.error('File input error:', error);
-                status = `File selection error: ${error.message}`;
-              }
-            }}
+            onchange={importSettings}
             class="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
           />
           <span class="block px-3 py-1 text-xs bg-[hsl(var(--bg-300))] hover:bg-[hsl(var(--bg-400))] text-[hsl(var(--text-200))] rounded-md font-medium">
