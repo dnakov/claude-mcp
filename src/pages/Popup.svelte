@@ -245,59 +245,93 @@
     const file = event.target.files[0];
     if (!file) return;
     
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      try {
-        const data = JSON.parse(e.target.result);
-        
-        // Basic validation
-        if (!data.servers || !Array.isArray(data.servers)) {
-          throw new Error('Invalid format: servers array not found');
-        }
-        
-        // Validate each server has required fields
-        for (const server of data.servers) {
-          if (!server.name || !server.url) {
-            throw new Error(`Invalid server: missing name or url`);
+    try {
+      const reader = new FileReader();
+      reader.onerror = (error) => {
+        console.error('FileReader error:', error);
+        status = `File read error: ${error.message || 'Unknown error'}`;
+        event.target.value = '';
+      };
+      
+      reader.onload = async (e) => {
+        try {
+          if (!e.target?.result) {
+            throw new Error('No file content received');
           }
+          
+          const data = JSON.parse(e.target.result);
+          
+          // Basic validation
+          if (!data || typeof data !== 'object') {
+            throw new Error('Invalid format: not a valid JSON object');
+          }
+          
+          if (!data.servers || !Array.isArray(data.servers)) {
+            throw new Error('Invalid format: servers array not found');
+          }
+          
+          // Validate each server has required fields
+          for (const [index, server] of data.servers.entries()) {
+            if (!server || typeof server !== 'object') {
+              throw new Error(`Invalid server at position ${index + 1}: not an object`);
+            }
+            if (!server.name || typeof server.name !== 'string') {
+              throw new Error(`Invalid server at position ${index + 1}: missing or invalid name`);
+            }
+            if (!server.url || typeof server.url !== 'string') {
+              throw new Error(`Invalid server at position ${index + 1}: missing or invalid url`);
+            }
+          }
+          
+          // Store import data and show modal
+          importData = data;
+          showImportModal = true;
+          
+          // Clear file input
+          event.target.value = '';
+          
+        } catch (e) {
+          console.error('Import parsing error:', e);
+          status = `Import failed: ${e.message}`;
+          event.target.value = '';
         }
-        
-        // Store import data and show modal
-        importData = data;
-        showImportModal = true;
-        
-        // Clear file input
-        event.target.value = '';
-        
-      } catch (e) {
-        status = `Import failed: ${e.message}`;
-        console.error('Import error:', e);
-        event.target.value = '';
-      }
-    };
-    
-    reader.readAsText(file);
+      };
+      
+      reader.readAsText(file);
+      
+    } catch (e) {
+      console.error('Import setup error:', e);
+      status = `Import failed: ${e.message}`;
+      event.target.value = '';
+    }
   }
 
   // Handle import actions
   async function handleImportAction(action) {
-    if (!importData) return;
+    if (!importData) {
+      console.error('No import data available');
+      status = 'No import data available';
+      return;
+    }
     
     try {
       if (action === 'cancel') {
         showImportModal = false;
         importData = null;
+        status = 'Import cancelled';
         return;
       }
       
       let newServers;
       if (action === 'replace') {
-        newServers = importData.servers;
+        newServers = [...importData.servers]; // Create a copy
       } else if (action === 'add') {
         // Merge: add new servers, skip duplicates by name
         const existingNames = new Set(servers.map(s => s.name));
         const newOnes = importData.servers.filter(s => !existingNames.has(s.name));
         newServers = [...servers, ...newOnes];
+      } else {
+        throw new Error(`Unknown action: ${action}`);
       }
       
       // Save servers
@@ -305,28 +339,29 @@
       await saveToStorage('mcpServers', servers);
       
       // Import settings if available
-      if (importData.settings) {
+      if (importData.settings && typeof importData.settings === 'object') {
         if (importData.settings.debugLog !== undefined) {
-          debugLog = importData.settings.debugLog;
+          debugLog = Boolean(importData.settings.debugLog);
           await saveToStorage('mcpDebugLog', debugLog);
         }
         if (importData.settings.darkMode !== undefined) {
-          darkMode = importData.settings.darkMode;
+          darkMode = Boolean(importData.settings.darkMode);
           await saveToStorage('mcpDarkMode', darkMode);
           updateTheme();
         }
       }
       
+      const totalImported = action === 'replace' ? newServers.length : (newServers.length - servers.length + importData.servers.length);
       status = action === 'replace' ? 
         `Replaced with ${newServers.length} servers` : 
-        `Added ${newServers.length - servers.length + importData.servers.length} new servers (${newServers.length} total)`;
+        `Added ${totalImported} new servers (${newServers.length} total)`;
       
       showImportModal = false;
       importData = null;
       
     } catch (e) {
+      console.error('Import action error:', e);
       status = `Import failed: ${e.message}`;
-      console.error('Import error:', e);
       showImportModal = false;
       importData = null;
     }
@@ -391,11 +426,17 @@
           <div class="mt-1">
             <div class="flex gap-1 mb-1">
               <input 
+                id="envKey"
+                name="envKey"
+                autocomplete="off"
                 bind:value={envKey} 
                 placeholder="Key" 
                 class="flex-1 p-1 bg-[hsl(var(--bg-100))] border border-[hsl(var(--border-100))] rounded-md text-[hsl(var(--text-200))] text-xs focus:outline-none focus:ring-1 focus:ring-[hsl(var(--accent-main-100))] focus:border-[hsl(var(--accent-main-100))]"
               />
               <input 
+                id="envValue"
+                name="envValue"
+                autocomplete="off"
                 bind:value={envValue} 
                 placeholder="Value" 
                 class="flex-1 p-1 bg-[hsl(var(--bg-100))] border border-[hsl(var(--border-100))] rounded-md text-[hsl(var(--text-200))] text-xs focus:outline-none focus:ring-1 focus:ring-[hsl(var(--accent-main-100))] focus:border-[hsl(var(--accent-main-100))]"
@@ -428,6 +469,9 @@
         
         <div class="flex gap-1 mb-1">
           <input 
+            id="argInput"
+            name="argInput"
+            autocomplete="off"
             bind:value={argInput} 
             placeholder="Add argument" 
             class="flex-1 p-1 bg-[hsl(var(--bg-100))] border border-[hsl(var(--border-100))] rounded-md text-[hsl(var(--text-200))] text-xs focus:outline-none focus:ring-1 focus:ring-[hsl(var(--accent-main-100))] focus:border-[hsl(var(--accent-main-100))]"
@@ -514,7 +558,14 @@
           <input 
             type="file" 
             accept=".json"
-            onchange={importSettings}
+            onchange={(e) => {
+              try {
+                importSettings(e);
+              } catch (error) {
+                console.error('File input error:', error);
+                status = `File selection error: ${error.message}`;
+              }
+            }}
             class="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
           />
           <span class="block px-3 py-1 text-xs bg-[hsl(var(--bg-300))] hover:bg-[hsl(var(--bg-400))] text-[hsl(var(--text-200))] rounded-md font-medium">
@@ -535,6 +586,8 @@
     <div class="flex items-center justify-between">
       <label class="flex items-center cursor-pointer">
         <input 
+          id="debugLog"
+          name="debugLog"
           type="checkbox" 
           bind:checked={debugLog} 
           onchange={() => saveToStorage('mcpDebugLog', debugLog)}
