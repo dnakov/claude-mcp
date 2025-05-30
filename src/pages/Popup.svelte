@@ -19,6 +19,8 @@
   let status = $state('');
   let debugLog = $state(false);
   let darkMode = $state(false);
+  let showImportModal = $state(false);
+  let importData = $state(null);
 
   // Set theme on document body
   function updateTheme() {
@@ -246,58 +248,23 @@
     const reader = new FileReader();
     reader.onload = async (e) => {
       try {
-        const importData = JSON.parse(e.target.result);
+        const data = JSON.parse(e.target.result);
         
         // Basic validation
-        if (!importData.servers || !Array.isArray(importData.servers)) {
+        if (!data.servers || !Array.isArray(data.servers)) {
           throw new Error('Invalid format: servers array not found');
         }
         
         // Validate each server has required fields
-        for (const server of importData.servers) {
+        for (const server of data.servers) {
           if (!server.name || !server.url) {
             throw new Error(`Invalid server: missing name or url`);
           }
         }
         
-        // Ask user about merge strategy
-        const shouldReplace = confirm(
-          `Import ${importData.servers.length} servers?\n\n` +
-          `Current servers: ${servers.length}\n` +
-          `Click OK to REPLACE all current servers\n` +
-          `Click Cancel to ADD to existing servers`
-        );
-        
-        let newServers;
-        if (shouldReplace) {
-          newServers = importData.servers;
-        } else {
-          // Merge: add new servers, skip duplicates by name
-          const existingNames = new Set(servers.map(s => s.name));
-          const newOnes = importData.servers.filter(s => !existingNames.has(s.name));
-          newServers = [...servers, ...newOnes];
-        }
-        
-        // Save servers
-        servers = newServers;
-        await saveToStorage('mcpServers', servers);
-        
-        // Import settings if available
-        if (importData.settings) {
-          if (importData.settings.debugLog !== undefined) {
-            debugLog = importData.settings.debugLog;
-            await saveToStorage('mcpDebugLog', debugLog);
-          }
-          if (importData.settings.darkMode !== undefined) {
-            darkMode = importData.settings.darkMode;
-            await saveToStorage('mcpDarkMode', darkMode);
-            updateTheme();
-          }
-        }
-        
-        status = shouldReplace ? 
-          `Replaced with ${newServers.length} servers` : 
-          `Added ${newServers.length - servers.length + importData.servers.length} new servers (${newServers.length} total)`;
+        // Store import data and show modal
+        importData = data;
+        showImportModal = true;
         
         // Clear file input
         event.target.value = '';
@@ -310,6 +277,59 @@
     };
     
     reader.readAsText(file);
+  }
+
+  // Handle import actions
+  async function handleImportAction(action) {
+    if (!importData) return;
+    
+    try {
+      if (action === 'cancel') {
+        showImportModal = false;
+        importData = null;
+        return;
+      }
+      
+      let newServers;
+      if (action === 'replace') {
+        newServers = importData.servers;
+      } else if (action === 'add') {
+        // Merge: add new servers, skip duplicates by name
+        const existingNames = new Set(servers.map(s => s.name));
+        const newOnes = importData.servers.filter(s => !existingNames.has(s.name));
+        newServers = [...servers, ...newOnes];
+      }
+      
+      // Save servers
+      servers = newServers;
+      await saveToStorage('mcpServers', servers);
+      
+      // Import settings if available
+      if (importData.settings) {
+        if (importData.settings.debugLog !== undefined) {
+          debugLog = importData.settings.debugLog;
+          await saveToStorage('mcpDebugLog', debugLog);
+        }
+        if (importData.settings.darkMode !== undefined) {
+          darkMode = importData.settings.darkMode;
+          await saveToStorage('mcpDarkMode', darkMode);
+          updateTheme();
+        }
+      }
+      
+      status = action === 'replace' ? 
+        `Replaced with ${newServers.length} servers` : 
+        `Added ${newServers.length - servers.length + importData.servers.length} new servers (${newServers.length} total)`;
+      
+      showImportModal = false;
+      importData = null;
+      
+    } catch (e) {
+      status = `Import failed: ${e.message}`;
+      console.error('Import error:', e);
+      showImportModal = false;
+      importData = null;
+    }
   }
 </script>
 
@@ -529,3 +549,39 @@
     </div>
   </div>
 </div>
+
+<!-- Import Modal -->
+{#if showImportModal && importData}
+  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div class="bg-[hsl(var(--bg-100))] border border-[hsl(var(--border-100))] rounded-lg p-4 max-w-md mx-4">
+      <h3 class="text-base font-semibold mb-3 text-[hsl(var(--text-000))]">Import Settings</h3>
+      
+      <div class="mb-4 text-sm text-[hsl(var(--text-200))]">
+        <p class="mb-2">Found <strong>{importData.servers.length}</strong> servers to import.</p>
+        <p class="mb-2">You currently have <strong>{servers.length}</strong> servers.</p>
+        <p class="text-[hsl(var(--text-300))]">What would you like to do?</p>
+      </div>
+      
+      <div class="flex gap-2 justify-end">
+        <button 
+          onclick={() => handleImportAction('cancel')}
+          class="px-3 py-2 text-sm bg-[hsl(var(--bg-300))] hover:bg-[hsl(var(--bg-400))] text-[hsl(var(--text-200))] rounded-md"
+        >
+          Cancel
+        </button>
+        <button 
+          onclick={() => handleImportAction('replace')}
+          class="px-3 py-2 text-sm bg-[hsl(var(--danger-100))] hover:bg-[hsl(var(--danger-200))] text-white rounded-md"
+        >
+          Replace
+        </button>
+        <button 
+          onclick={() => handleImportAction('add')}
+          class="px-3 py-2 text-sm bg-[hsl(var(--accent-main-100))] hover:bg-[hsl(var(--accent-main-000))] text-white rounded-md"
+        >
+          Add
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
