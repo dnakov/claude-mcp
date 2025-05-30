@@ -31,6 +31,28 @@
   // Load data on startup
   $effect(() => {
     loadData();
+    
+    // Add global error handler to prevent popup from closing on errors
+    const handleError = (event) => {
+      console.error('Global error caught:', event.error);
+      status = `Error: ${event.error?.message || 'Unknown error occurred'}`;
+      event.preventDefault(); // Prevent default browser error handling
+    };
+    
+    const handleUnhandledRejection = (event) => {
+      console.error('Unhandled promise rejection:', event.reason);
+      status = `Promise error: ${event.reason?.message || 'Unknown promise error'}`;
+      event.preventDefault(); // Prevent default browser error handling
+    };
+    
+    window.addEventListener('error', handleError);
+    window.addEventListener('unhandledrejection', handleUnhandledRejection);
+    
+    // Cleanup on destroy
+    return () => {
+      window.removeEventListener('error', handleError);
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+    };
   });
 
   // Load all data from storage
@@ -382,6 +404,8 @@
         <label for="name" class="block mb-0.5 text-xs font-medium text-[hsl(var(--text-300))]">Name:</label>
         <input 
           id="name" 
+          name="name"
+          autocomplete="off"
           bind:value={currentServer.name} 
           placeholder="server name" 
           class="input-field"
@@ -392,6 +416,8 @@
         <label for="url" class="block mb-0.5 text-xs font-medium text-[hsl(var(--text-300))]">URL:</label>
         <input 
           id="url" 
+          name="url"
+          autocomplete="off"
           bind:value={currentServer.url} 
           placeholder="SSE URL" 
           class="input-field"
@@ -402,6 +428,8 @@
         <label for="command" class="block mb-0.5 text-xs font-medium text-[hsl(var(--text-300))]">Command:</label>
         <input 
           id="command" 
+          name="command"
+          autocomplete="off"
           bind:value={currentServer.command} 
           placeholder="command to execute" 
           class="input-field"
