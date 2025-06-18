@@ -38,10 +38,15 @@
     }
   ],
   "{{firefox}}.web_accessible_resources": ["src/content.js", "src/isolated-content.js"],
-  "permissions": [
+  "{{chrome}}.permissions": [
     "storage"
   ],
-  "host_permissions": [
+  "{{firefox}}.permissions": [
+    "storage",
+    "*://claude.ai/*",
+    "*://*/*"
+  ],
+  "{{chrome}}.host_permissions": [
     "*://claude.ai/*"
   ]
 }

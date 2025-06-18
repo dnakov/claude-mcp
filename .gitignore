@@ -6,10 +6,14 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
-
+.env
+.env.*
+dist-chrome
+dist-firefox
 node_modules
 dist
 dist-ssr
+
 *.local
 
 # Editor directories and files

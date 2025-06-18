@@ -14,6 +14,9 @@ function generateManifest() {
   };
 }
 
+// Get target browser from environment variable
+const targetBrowser = process.env.TARGET_BROWSER || 'chrome';
+
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
@@ -22,12 +25,14 @@ export default defineConfig({
     webExtension({
       manifest: generateManifest,
       watchFilePaths: ["package.json", "manifest.json"],
+      browser: targetBrowser,
       webExtConfig: {
         chromiumBinary: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
       },
     }),
   ],
   build: {
-    minify: false
+    minify: false,
+    outDir: `dist-${targetBrowser}`, // Use different output directories
   }
 });

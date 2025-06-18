@@ -197,7 +197,9 @@
   // Helper function to save to storage with notification
   async function saveToStorage(key, value) {
     try {
-      await browser.storage.local.set({ [key]: value });
+      // Convert proxy objects to plain objects for serialization
+      const plainValue = JSON.parse(JSON.stringify(value));
+      await browser.storage.local.set({ [key]: plainValue });
       // The storage listener in isolated-content.js will handle notifying content scripts
     } catch (e) {
       status = `Error saving: ${e.message}`;

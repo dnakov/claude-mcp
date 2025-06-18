@@ -5,11 +5,19 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build"
+    "build": "vite build",
+    "build:chrome": "cross-env TARGET_BROWSER=chrome vite build",
+    "build:firefox": "cross-env TARGET_BROWSER=firefox vite build",
+    "build:all": "npm run build:chrome && npm run build:firefox",
+    "package:firefox": "cd dist-firefox && zip -r ../claude-mcp-firefox.xpi .",
+    "package:chrome": "cd dist-chrome && zip -r ../claude-mcp-chrome.zip .",
+    "package:all": "npm run package:firefox && npm run package:chrome",
+    "build:package:all": "npm run build:all && npm run package:all"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^4.0.0",
     "@types/chrome": "^0.0.315",
+    "cross-env": "^7.0.3",
     "svelte": "^5.0.0",
     "vite": "^5.4.4",
     "vite-plugin-web-extension": "^4.1.6",
